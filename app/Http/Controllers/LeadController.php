@@ -11,35 +11,35 @@ use App\Notifications\LeadAssignedNotification;
 
 class LeadController extends Controller
 {
-    public function index(Request $request)
-    {
-        $query = Lead::with(['assignedTo', 'createdBy'])
-            ->where('company_id', Auth::user()->company_id);
+  public function index(Request $request)
+{
+    $query = Lead::with(['assignedTo', 'createdBy'])
+        ->where('company_id', auth()->user()->company_id);
 
-        // Filter by status
-        if ($request->filled('status')) {
-            $query->where('status', $request->status);
-        }
-
-        // Filter by assigned user
-        if ($request->filled('assigned_to')) {
-            $query->where('assigned_to', $request->assigned_to);
-        }
-
-        // Search
-        if ($request->filled('search')) {
-            $query->where(function($q) use ($request) {
-                $q->where('name', 'like', '%' . $request->search . '%')
-                  ->orWhere('email', 'like', '%' . $request->search . '%')
-                  ->orWhere('phone', 'like', '%' . $request->search . '%');
-            });
-        }
-
-        $leads = $query->latest()->paginate(20);
-        $teamMembers = User::where('company_id', Auth::user()->company_id)->get();
-
-        return view('leads.index', compact('leads', 'teamMembers'));
+    // Filter by status
+    if ($request->filled('status')) {
+        $query->where('status', $request->status);
     }
+
+    // Filter by assigned user
+    if ($request->filled('assigned_to')) {
+        $query->where('assigned_to', $request->assigned_to);
+    }
+
+    // Search
+    if ($request->filled('search')) {
+        $query->where(function($q) use ($request) {
+            $q->where('name', 'like', '%' . $request->search . '%')
+              ->orWhere('email', 'like', '%' . $request->search . '%')
+              ->orWhere('phone', 'like', '%' . $request->search . '%');
+        });
+    }
+
+    $leads = $query->paginate(15);
+    $teamMembers = User::where('company_id', auth()->user()->company_id)->get();
+
+    return view('leads.index', compact('leads', 'teamMembers'));
+}
 
     public function kanban()
     {
@@ -91,19 +91,30 @@ class LeadController extends Controller
         $validated['status'] = 'new';
 
       $lead = Lead::create($validated);
+      
 // Send notification if assigned
 if ($lead->assigned_to) {
-    $lead->assignedTo->notify(new LeadAssignedNotification($lead, Auth::user()->name));
-}
+        $lead->assignedTo->notify(new LeadAssignedNotification($lead));
+    }
         return redirect()->route('leads.index')
             ->with('success', 'Lead created successfully!');
     }
 
-    public function show(Lead $lead)
-    {
-        $this->authorize('view', $lead);
-        return view('leads.show', compact('lead'));
-    }
+public function show(Lead $lead)
+{
+    // Calculate lead score
+    $scoringService = new \App\Services\LeadScoringService();
+    $scoringService->calculateScore($lead);
+
+    // Load relationships
+    $lead->load(['activities.user', 'activities.attachments', 'followUps.assignedTo', 'score']);
+    
+    // Get users for follow-up assignment
+    $users = User::where('company_id', auth()->user()->company_id)->get();
+
+    return view('leads.show', compact('lead', 'users'));
+}
+
 
     public function edit(Lead $lead)
     {
@@ -144,6 +155,19 @@ if ($lead->assigned_to && $lead->assigned_to != $oldAssignee) {
         return redirect()->route('leads.index')
             ->with('success', 'Lead updated successfully!');
     }
+
+    public function updateNotes(Request $request, Lead $lead)
+{
+    $request->validate([
+        'notes' => 'nullable|string'
+    ]);
+
+    $lead->update([
+        'notes' => $request->notes
+    ]);
+
+    return back()->with('success', 'Notes updated successfully');
+}
 
     public function destroy(Lead $lead)
     {

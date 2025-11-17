@@ -4,10 +4,10 @@ namespace App\Http\Controllers;
 
 use App\Models\Lead;
 use App\Models\Property;
-use App\Models\Project;
+use App\Models\Task;
+use App\Models\Appointment;
+use App\Models\Activity;
 use App\Models\User;
-use App\Models\Company;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 
@@ -15,77 +15,91 @@ class DashboardController extends Controller
 {
     public function index()
     {
-        $user = Auth::user();
-
-        if ($user->role === 'super_admin') {
-            return $this->superAdminDashboard();
-        } else {
-            return $this->companyDashboard();
-        }
-    }
-
-    private function superAdminDashboard()
-    {
-        $stats = [
-            'total_companies' => Company::count(),
-            'active_companies' => Company::where('status', 'active')->count(),
-            'total_users' => User::count(),
-            'total_leads' => Lead::count(),
-        ];
-
-        $recentCompanies = Company::with('package')->latest()->limit(5)->get();
-        $companiesData = Company::select('status', DB::raw('count(*) as count'))
-            ->groupBy('status')
-            ->get();
-
-        return view('dashboard.super-admin', compact('stats', 'recentCompanies', 'companiesData'));
-    }
-
-    private function companyDashboard()
-    {
         $companyId = Auth::user()->company_id;
+        $userId = Auth::id();
+        $isAdmin = Auth::user()->role === 'company_admin';
 
-        $stats = [
-            'total_leads' => Lead::where('company_id', $companyId)->count(),
-            'new_leads' => Lead::where('company_id', $companyId)->where('status', 'new')->count(),
-            'won_leads' => Lead::where('company_id', $companyId)->where('status', 'won')->count(),
-            'total_properties' => Property::where('company_id', $companyId)->count(),
-            'available_properties' => Property::where('company_id', $companyId)->where('status', 'available')->count(),
-            'sold_properties' => Property::where('company_id', $companyId)->where('status', 'sold')->count(),
-            'total_projects' => Project::where('company_id', $companyId)->count(),
-            'team_members' => User::where('company_id', $companyId)->count(),
-        ];
+        // Lead Statistics
+        $totalLeads = Lead::where('company_id', $companyId)->count();
+        $newLeads = Lead::where('company_id', $companyId)
+            ->where('status', 'new')
+            ->count();
+        $qualifiedLeads = Lead::where('company_id', $companyId)
+            ->where('status', 'qualified')
+            ->count();
+        $wonLeads = Lead::where('company_id', $companyId)
+            ->where('status', 'won')
+            ->count();
+        
+        // Conversion Rate
+        $conversionRate = $totalLeads > 0 ? round(($wonLeads / $totalLeads) * 100, 2) : 0;
 
-        // Lead status distribution
-        $leadsData = Lead::where('company_id', $companyId)
-            ->select('status', DB::raw('count(*) as count'))
+        // My Tasks (if not admin, show only assigned)
+        $myTasks = Task::where('company_id', $companyId)
+            ->when(!$isAdmin, fn($q) => $q->where('assigned_to', $userId))
+            ->where('status', 'pending')
+            ->count();
+
+        // Today's Appointments
+        $todayAppointments = Appointment::where('company_id', $companyId)
+            ->when(!$isAdmin, fn($q) => $q->where('assigned_to', $userId))
+            ->whereDate('start_time', today())
+            ->count();
+
+        // Properties
+        $totalProperties = Property::where('company_id', $companyId)->count();
+        $availableProperties = Property::where('company_id', $companyId)
+            ->where('status', 'available')
+            ->count();
+
+        // Monthly Lead Trends (last 6 months)
+        $monthlyLeads = Lead::where('company_id', $companyId)
+            ->select(DB::raw('DATE_FORMAT(created_at, "%Y-%m") as month'), DB::raw('count(*) as total'))
+            ->where('created_at', '>=', now()->subMonths(6))
+            ->groupBy('month')
+            ->orderBy('month')
+            ->get();
+
+        // Lead by Status
+        $leadsByStatus = Lead::where('company_id', $companyId)
+            ->select('status', DB::raw('count(*) as total'))
             ->groupBy('status')
-            ->get()
-            ->pluck('count', 'status');
-
-        // Recent leads
-        $recentLeads = Lead::where('company_id', $companyId)
-            ->with(['assignedTo'])
-            ->latest()
-            ->limit(5)
             ->get();
 
-        // Recent properties
-        $recentProperties = Property::where('company_id', $companyId)
-            ->latest()
-            ->limit(5)
+        // Recent Activities
+        $recentActivities = Activity::with(['lead', 'user'])
+            ->where('company_id', $companyId)
+            ->when(!$isAdmin, fn($q) => $q->where('user_id', $userId))
+            ->latest('activity_date')
+            ->limit(10)
             ->get();
 
-        // Top performing agents
-        $topAgents = User::where('company_id', $companyId)
-            ->where('role', 'agent')
-            ->withCount(['assignedLeads as won_leads' => function($query) {
-                $query->where('status', 'won');
+        // Top Performing Agents (admin only)
+        $topAgents = [];
+        if ($isAdmin) {
+            $topAgents = User::withCount(['assignedLeads as won_leads' => function ($q) {
+                $q->where('status', 'won');
             }])
-            ->orderBy('won_leads', 'desc')
+            ->where('company_id', $companyId)
+            ->orderByDesc('won_leads')
+            ->limit(5)
+            ->get();
+        }
+
+        // Upcoming Follow-ups
+        $upcomingFollowUps = \App\Models\FollowUp::with(['lead', 'assignedTo'])
+            ->where('company_id', $companyId)
+            ->when(!$isAdmin, fn($q) => $q->where('assigned_to', $userId))
+            ->where('status', 'pending')
+            ->where('follow_up_date', '>=', now())
+            ->orderBy('follow_up_date')
             ->limit(5)
             ->get();
 
-        return view('dashboard.company', compact('stats', 'leadsData', 'recentLeads', 'recentProperties', 'topAgents'));
+        return view('dashboard', compact(
+            'totalLeads', 'newLeads', 'qualifiedLeads', 'wonLeads', 'conversionRate',
+            'myTasks', 'todayAppointments', 'totalProperties', 'availableProperties',
+            'monthlyLeads', 'leadsByStatus', 'recentActivities', 'topAgents', 'upcomingFollowUps'
+        ));
     }
 }

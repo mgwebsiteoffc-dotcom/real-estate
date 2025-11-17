@@ -2,32 +2,19 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Activity extends Model
 {
-    use HasFactory;
-
-    protected $fillable = [
-        'company_id',
-        'user_id',
-        'activityable_type',
-        'activityable_id',
-        'type',
-        'title',
-        'description',
-        'metadata',
-    ];
-
+    protected $guarded = [];
+    
     protected $casts = [
-        'metadata' => 'array',
+        'activity_date' => 'datetime',
     ];
 
-    // Relationships
-    public function company()
+    public function lead()
     {
-        return $this->belongsTo(Company::class);
+        return $this->belongsTo(Lead::class);
     }
 
     public function user()
@@ -35,8 +22,8 @@ class Activity extends Model
         return $this->belongsTo(User::class);
     }
 
-    public function activityable()
+    public function attachments()
     {
-        return $this->morphTo();
+        return $this->hasMany(ActivityAttachment::class);
     }
 }

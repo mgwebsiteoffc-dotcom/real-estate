@@ -105,12 +105,23 @@ public function tasks()
     return $this->morphMany(Task::class, 'taskable');
 }
 
-public function activities()
-{
-    return $this->morphMany(Activity::class, 'activityable');
-}
 public function project()
 {
     return $this->belongsTo(Project::class);
 }
+public function activities()
+{
+    return $this->hasMany(Activity::class)->orderBy('activity_date', 'desc');
+}
+
+public function followUps()
+{
+    return $this->hasMany(FollowUp::class)->orderBy('follow_up_date', 'asc');
+}
+
+public function score()
+{
+    return $this->hasOne(LeadScore::class);
+}
+
 }

@@ -38,6 +38,16 @@ class Task extends Model
         return $this->belongsTo(Company::class);
     }
 
+     public function lead()
+    {
+        return $this->belongsTo(Lead::class);
+    }
+
+     public function activities()
+    {
+        return $this->hasMany(TaskActivity::class)->orderBy('created_at', 'desc');
+    }
+    
     public function createdBy()
     {
         return $this->belongsTo(User::class, 'created_by');

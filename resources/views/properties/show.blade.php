@@ -12,6 +12,11 @@
             <a href="{{ route('properties.edit', $property) }}" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
                 <i class="fas fa-edit mr-2"></i> Edit
             </a>
+
+            <!-- Add this button next to Edit button -->
+<a href="{{ route('properties.sync-status', $property) }}" class="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700">
+    <i class="fas fa-sync-alt"></i> Portal Sync
+</a>
             <form action="{{ route('properties.destroy', $property) }}" method="POST" onsubmit="return confirm('Are you sure?')">
                 @csrf
                 @method('DELETE')
